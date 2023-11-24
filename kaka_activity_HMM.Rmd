@@ -1,0 +1,267 @@
+---
+title: "Kākā Activity Hidden Markov Modelling"
+author: "Scott Forrest"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Setup packages
+
+```{r packages, message=FALSE, warning=FALSE}
+
+# devtools::install_github("wilkelab/ungeviz")
+
+library(tidyverse)
+
+packages <- c("ggplot2", "lubridate", "magrittr", "forcats", "actogrammr", "ungeviz", "devtools", "behavr", "ggetho", "damr", "scopr", "sleepr", "zeitgebr", "momentuHMM", "ggpubr", "oce", "tictoc")
+walk(packages, require, character.only = T)
+
+```
+
+# Import data
+
+```{r}
+
+activity_files <- paste0("data/", list.files(path = "data", pattern = "2021")) # writes .csv file names to chr vector - 2021 is common across all the datasets of interest
+all_activity <- map(activity_files, read.csv, skip = 4) # reads csv files
+
+```
+
+# Clean data
+
+```{r}
+
+tags <- c("A05","A06","A07","A08","A09","A10","A11","A12","A13","A14")
+
+for (i in 1:length(all_activity)) {
+  all_activity[[i]]$ID <- tags[i] # add ID column
+  all_activity[[i]]$DateTimeGMT <- as.POSIXct(all_activity[[i]]$GMT.Time, format = "%d/%m/%Y %I:%M:%S %p", tz = "UTC") # create POSIXct time
+  all_activity[[i]]$DateTimeNZ <- with_tz(all_activity[[i]]$DateTimeGMT, "Pacific/Auckland")
+  all_activity[[i]]$Temp <- all_activity[[i]]$Temperature..C. # rename temperature
+  all_activity[[i]]$Temperature..C. <- NULL # remove untidy column
+}
+
+names(all_activity) <- tags
+all_activity_df <- bind_rows(all_activity, .id = "ID") # bind all activity data into one dataframe
+
+```
+
+# Exploratory data analysis
+
+It appears there are quite clearly two distinct activity states, one with a higher ODBA and one with a lower ODBA. 
+
+```{r}
+
+for(i in 1:length(all_activity)) {
+
+  # histogram of ODBA
+  print(all_activity[[i]] |>  ggplot(aes(ODBA)) +
+      geom_histogram(binwidth = 5, alpha = 1, fill = "orange") +
+      ggtitle(paste0("Kākā ID: ", tags[i])) +
+      scale_x_continuous("Overall Dynamic Body Acceleration (ODBA)") +
+      theme_bw())
+  
+}
+
+```
+
+The log of ODBA also indicates a possible 3rd state.
+
+```{r}
+
+for(i in 1:length(all_activity)) {
+
+  # histogram of log(ODBA)
+  print(all_activity[[i]] |>  ggplot(aes(log(ODBA))) +
+    geom_histogram(binwidth = 0.025, alpha = 1, fill = "orange") +
+      ggtitle(paste0("Kākā ID: ", tags[i])) +
+      scale_x_continuous("log of Overall Dynamic Body Acceleration (ODBA)") +
+    theme_bw())
+  
+}
+
+```
+
+# Prepare data for HMM
+
+```{r}
+
+# preparing as a single data frame
+all_prepped <- prepData(data = all_activity_df, coordNames = NULL)
+head(all_prepped, 10)
+
+# preparing as a list
+all_prepped <- vector(mode = "list", length = length(all_activity))
+
+for (i in 1:length(all_activity)) {
+  all_prepped[[i]] <- prepData(data = all_activity[[i]], coordNames = NULL)
+}
+
+```
+
+## Testing distributions to provide intiial parameter estimates in the hidden Markov models
+
+```{r}
+
+# test <- rweibull(10000, shape = .4, scale = 7)
+# hist(test, breaks = 1000, xlim = c(1,100)) # state 1 minimum
+
+# test <- log(rweibull(10000, shape = .5, scale = 8))
+# hist(test, breaks = 1000) # looks appropriate for rest state
+
+test <- log(rweibull(10000, shape = 1, scale = 8))
+hist(test, breaks = 100) # looks appropriate for rest state - used in model
+
+# test <- rweibull(10000, shape = 1, scale = 9)
+# hist(test, breaks = 1000, xlim = c(1,100)) # state 1 maximum
+
+
+# test <- rweibull(10000, shape = 1.5, scale = 150)
+# hist(test, breaks = 100) # looks appropriate for active state
+
+test <- rweibull(10000, shape = 2, scale = 200)
+hist(test, breaks = 100) # looks appropriate for active state - used in model
+
+# test <- rweibull(10000, shape = 2.5, scale = 250)
+# hist(test, breaks = 100) # looks appropriate for active state
+
+```
+
+
+
+```{r}
+
+stateNames <- c("active", "inactive")
+dist <- list(ODBA = "weibull")
+
+# parameters of weibull distributions to fit to data
+# STATE 1 - shape = 1, scale = 8 
+# STATE 2 - shape = 2, scale = 250
+Par0 <- list(ODBA = c(1, 2, 8, 250)) # initial parameter estimates
+
+```
+
+# Fit HMM to all individuals iteratively
+
+```{r}
+
+all_hmms <- vector(mode = "list", length = length(all_activity))
+
+for(i in 1:length(all_activity)) {
+  
+  tic()
+  
+  all_hmms[[i]] <- fitHMM(all_prepped[[i]],
+                    nbStates = 2,
+                    dist = dist,
+                    Par0 = Par0,
+                    stateNames = stateNames) 
+  toc()
+  
+  plot(all_hmms[[i]], plotCI = T, breaks = 50, ask = FALSE)
+
+  states <- viterbi(all_hmms[[i]]) # fit viterbi algorithm
+  table(states)/nrow(all_prepped[[i]]) # proportion of time spent in states
+  all_prepped[[i]]$states <- as.factor(states) # add states column to DF
+  
+}
+
+```
+
+Organise the results and additional information into a data frame for plotting and further analysis
+
+```{r}
+
+all_prepped_df <- bind_rows(all_prepped) # bind all activity data into one dataframe
+
+all_prepped_df_nested <- all_prepped_df |> group_by(ID) |> nest()
+all_prepped_df_nested$sex <- c("m", "m", "m", "f", "f", "f", "f", "m", "m", "f")
+all_prepped_df_nested$age <- c(1, 10, 5, 1, 3, 2, 2, 3, 10, 8)
+all_prepped_df_nested$origin <- c("o", "o", "c", "o", "o", "o", "o", "c", "c","o")
+
+# estimate the sun's azimuth and angle from the latitude, longitude and time
+sun_df <- data.frame(oce::sunAngle(all_prepped_df$DateTimeNZ, latitude = -45.77813, longitude = 170.604312))
+
+all_prepped_df <- all_prepped_df_nested |> unnest(cols = c(data)) |> ungroup() |> 
+  mutate(ID = factor(ID), 
+         states = factor(states), 
+         sex = factor(sex), 
+         origin = factor(origin),
+         year = lubridate::year(DateTimeNZ),
+         month = lubridate::month(DateTimeNZ),
+         month_chr = lubridate::month(DateTimeNZ, label = TRUE, abbr = FALSE),
+         month_year = lubridate::floor_date(DateTimeNZ, unit = "month"),
+         day = lubridate::day(DateTimeNZ),
+         time = hms::as_hms(DateTimeNZ),
+         sun_azimuth = sun_df$azimuth,
+         sun_altitude = sun_df$altitude) 
+
+head(all_prepped_df, 10)
+
+write_csv(all_prepped_df, paste0("outputs/data_files/all_prepped_df_", Sys.Date(), ".csv"))
+
+```
+
+Estimate the proportion of time spent in each state
+
+```{r}
+
+prop <- vector(mode = "list", length = length(all_activity))
+
+for (i in 1:length(all_activity)) {
+  
+prop[[i]] <- all_prepped[[i]] |> group_by(states) |> summarise(n = n()) %$% n
+
+}
+
+names(prop) <- tags
+prop_df <- data.frame(do.call(rbind, prop)) |> mutate(id = tags)
+colnames(prop_df) <- c("inactive", "active", "id")
+prop_df <- prop_df |> mutate(prop_inactive = inactive/(inactive + active), prop_active = active/(inactive + active))
+
+write_csv(prop_df, paste0("outputs/data_files/minutes_active_inactive_", Sys.Date(), ".csv"))
+
+prop_df_long <- prop_df |> pivot_longer(cols = !"id", values_to = "value")
+
+```
+
+# Plotting
+
+## Actograms
+
+```{r}
+
+i = 1
+
+# all_prepped_df %>% filter(ID == tags[i]) %>% 
+#   ggplot(aes(x = time, y = day)) +
+#   geom_vpline(aes(fill = ODBA), height = 1) +
+#   scale_fill_gradient(low = "dark blue", high = "white") +
+#   geom_vpline(aes(color = ifelse(sun_altitude > 0.1 | sun_altitude < -0.1, "normal", "sunset_sunrise"),
+#                  alpha = ifelse(sun_altitude > 0.1 | sun_altitude < -0.1, 0, 1)), height = 1.5) +
+#   scale_color_manual(values = c("normal" = "transparent", "sunset_sunrise" = "red")) +
+#   scale_y_reverse() +
+#   facet_wrap(~ month_year) +
+#   ggtitle("45505") +
+#   theme_bw() +
+#   guides(alpha = "none")  # Hide the alpha guide
+
+for(i in 1:length(tags)) {
+
+  print(all_prepped_df %>% filter(ID == tags[i]) %>% 
+          ggplot(aes(x = time, y = day)) +
+          geom_vpline(aes(colour = ODBA), height = 1) +
+          scale_colour_gradient(low = "dark blue", high = "white") +
+          scale_y_reverse() +
+          facet_wrap(~ month_year) +
+          ggtitle(paste0("Kākā ID: ", tags[i])) +
+          theme_bw())
+  
+}
+
+```
+
