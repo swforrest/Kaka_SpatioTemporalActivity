@@ -196,6 +196,7 @@ all_prepped_df <- all_prepped_df_nested |> unnest(cols = c(data)) |> ungroup() |
          month_chr = lubridate::month(DateTimeNZ, label = TRUE, abbr = FALSE),
          month_year = lubridate::floor_date(DateTimeNZ, unit = "month"),
          day = lubridate::day(DateTimeNZ),
+         yday = as.numeric(round(difftime(DateTimeNZ, min(DateTimeNZ), units = "days"))),
          time = hms::as_hms(DateTimeNZ),
          sun_azimuth = sun_df$azimuth,
          sun_altitude = sun_df$altitude) 
@@ -233,35 +234,341 @@ prop_df_long <- prop_df |> pivot_longer(cols = !"id", values_to = "value")
 
 ## Actograms
 
+### Colouring by ODBA
+
+Showing a single day
+
 ```{r}
 
-i = 1
+i = 8
 
-# all_prepped_df %>% filter(ID == tags[i]) %>% 
-#   ggplot(aes(x = time, y = day)) +
-#   geom_vpline(aes(fill = ODBA), height = 1) +
-#   scale_fill_gradient(low = "dark blue", high = "white") +
-#   geom_vpline(aes(color = ifelse(sun_altitude > 0.1 | sun_altitude < -0.1, "normal", "sunset_sunrise"),
-#                  alpha = ifelse(sun_altitude > 0.1 | sun_altitude < -0.1, 0, 1)), height = 1.5) +
-#   scale_color_manual(values = c("normal" = "transparent", "sunset_sunrise" = "red")) +
-#   scale_y_reverse() +
-#   facet_wrap(~ month_year) +
-#   ggtitle("45505") +
-#   theme_bw() +
-#   guides(alpha = "none")  # Hide the alpha guide
+all_prepped_df %>% filter(ID == tags[i] & month == 9 & day == 1) %>% # 
+  ggplot() +
+  geom_point(aes(x = DateTimeNZ, y = ODBA), colour = "black", size = 0.75, alpha = 0.75) +
+  # scale_colour_gradient(low = "dark blue", high = "white") +
+  scale_colour_viridis_c() +
+  scale_x_datetime("Time", date_breaks = "4 hours", date_labels = "%H:%M") +
+  ggtitle(paste0("Kākā ID: ", tags[i])) +
+  theme_classic() +
+  theme(legend.position = "none")
+
+ggsave(paste0("outputs/plots/scatter_singleday_ODBA_id_", tags[i], "_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
+
+all_prepped_df %>% filter(ID == tags[i] & month == 9 & day == 1) %>% # 
+  ggplot(aes(x = DateTimeNZ, y = day)) +
+  geom_vpline(aes(colour = log(ODBA)), height = 1) +
+  # scale_colour_gradient(low = "dark blue", high = "white") +
+  scale_colour_viridis_c() +
+  scale_x_datetime("Time", date_breaks = "4 hours", date_labels = "%H:%M") +
+  ggtitle(paste0("Kākā ID: ", tags[i])) +
+  theme_classic() +
+  theme(legend.position = "none")
+
+ggsave(paste0("outputs/plots/actogram_singleday_logODBA_id_", tags[i], "_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
+
+```
+
+Showing all days for all individuals
+
+```{r}
 
 for(i in 1:length(tags)) {
 
-  print(all_prepped_df %>% filter(ID == tags[i]) %>% 
+  print(all_prepped_df %>% filter(ID == tags[i] & month %in% c(9:12, 1:2)) %>% # 
           ggplot(aes(x = time, y = day)) +
-          geom_vpline(aes(colour = ODBA), height = 1) +
-          scale_colour_gradient(low = "dark blue", high = "white") +
+          geom_vpline(aes(colour = log(ODBA)), height = 1) +
+          # scale_colour_gradient(low = "dark blue", high = "white") +
+          scale_colour_viridis_c() +
           scale_y_reverse() +
           facet_wrap(~ month_year) +
           ggtitle(paste0("Kākā ID: ", tags[i])) +
-          theme_bw())
+          theme_bw() +
+          theme(legend.position = "none"))
+  
+  ggsave(paste0("outputs/plots/actogram_logODBA_id_", tags[i], "_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
   
 }
+
+```
+
+Colouring by state
+
+```{r}
+
+for(i in 1:length(tags)) {
+
+  print(all_prepped_df %>% filter(ID == tags[i] & month %in% c(9:12, 1:2)) %>% # 
+          ggplot(aes(x = time, y = day)) +
+          geom_vpline(aes(colour = states), height = 1) +
+          # scale_colour_gradient(low = "dark blue", high = "white") +
+          scale_colour_viridis_d() +
+          scale_y_reverse() +
+          facet_wrap(~ month_year) +
+          ggtitle(paste0("Kākā ID: ", tags[i])) +
+          theme_bw() +
+          theme(legend.position = "none"))
+  
+}
+
+```
+
+## Single day
+
+```{r}
+
+i = 8 # select individual - ID 45512
+
+sept_day_id12 <- all_prepped_df %>% filter(ID == tags[i] & month == 9 & day == 1)
+
+# unique(diff(sign(jan30_id12$sun_altitude))) # this function finds when the sun altitude changes sign (i.e. sunrise and sunset)
+
+sept_plot <- sept_day_id12 %>%
+  
+  ggplot() +
+  # adding a rectangle for nautical twilight
+  geom_rect(aes(xmin = DateTimeNZ[which(diff(sign(sun_altitude - -12)) > 0)], 
+                xmax = DateTimeNZ[which(diff(sign(sun_altitude)) > 0)], ymin = -Inf, ymax = Inf), fill = "skyblue", alpha = 0.01) +
+  geom_rect(aes(xmin = DateTimeNZ[which(diff(sign(sun_altitude - -12)) < 0)], 
+                xmax = DateTimeNZ[which(diff(sign(sun_altitude)) < 0)], ymin = -Inf, ymax = Inf), fill = "skyblue", alpha = 0.01) +
+  geom_point(aes(x = DateTimeNZ, y = ODBA, colour = states), size = 0.75, alpha = 0.5) +
+  geom_line(aes(x = DateTimeNZ, y = 3*sun_altitude)) +
+  geom_hline(yintercept = 0, linetype = "dashed") + 
+  # vertical line at time when sun rises
+  geom_vline(xintercept = sept_day_id12$DateTimeNZ[which(diff(sign(sept_day_id12$sun_altitude)) > 0)], linetype = "dashed") +
+  # vertical line at time when sun sets
+  geom_vline(xintercept = sept_day_id12$DateTimeNZ[which(diff(sign(sept_day_id12$sun_altitude)) < 0)], linetype = "dashed") +
+  scale_y_continuous(limits = c(min(3*sept_day_id12$sun_altitude), 750)) +
+  # scale_colour_viridis_d() +
+  ggtitle(paste0("Kākā ID: ", tags[i])) +
+  theme_classic() +
+  theme(legend.position = "none")
+
+sept_plot
+
+
+jan_day_id12 <- all_prepped_df %>% filter(ID == tags[i] & month == 1 & day == 1)
+
+jan_plot <- jan30_id12 %>%
+  
+  ggplot() +
+  # adding a rectangle for nautical twilight
+  geom_rect(aes(xmin = DateTimeNZ[which(diff(sign(sun_altitude - -12)) > 0)], 
+                xmax = DateTimeNZ[which(diff(sign(sun_altitude)) > 0)], ymin = -Inf, ymax = Inf), fill = "skyblue", alpha = 0.01) +
+    geom_rect(aes(xmin = DateTimeNZ[which(diff(sign(sun_altitude - -12)) < 0)], 
+                xmax = DateTimeNZ[which(diff(sign(sun_altitude)) < 0)], ymin = -Inf, ymax = Inf), fill = "skyblue", alpha = 0.01) +
+    geom_point(aes(x = DateTimeNZ, y = ODBA, colour = states), size = 0.75, alpha = 0.5) +
+  geom_line(aes(x = DateTimeNZ, y = 3*sun_altitude)) +
+  geom_hline(yintercept = 0, linetype = "dashed") + 
+  # vertical line at time when sun rises
+  geom_vline(xintercept = jan30_id12$DateTimeNZ[which(diff(sign(jan30_id12$sun_altitude)) > 0)], linetype = "dashed") +
+  # vertical line at time when sun sets
+  geom_vline(xintercept = jan30_id12$DateTimeNZ[which(diff(sign(jan30_id12$sun_altitude)) < 0)], linetype = "dashed") +
+  scale_y_continuous(limits = c(min(3*sept_day_id12$sun_altitude), 750)) +
+  # scale_colour_viridis_d() +
+  # ggtitle(paste0("Kākā ID: ", tags[i])) +
+  theme_classic() +
+  theme(legend.position = "none")
+
+jan_plot
+
+ggarrange(sept_plot + rremove("xlab"), jan_plot, ncol = 1, nrow = 2)
+
+ggsave(paste0("outputs/plots/HMM_45512_Sept_Jan_ggarranged_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
+
+```
+
+Determining the active time per day per individual
+
+```{r}
+
+active_time_day_id <- all_prepped_df |> 
+  group_by(ID, yday) |> 
+  summarise(inactive_time = sum(states == 1), active_time = sum(states == 2), total = n()) |> 
+  filter(total > 1400 & yday > 3 & yday < 180) |> 
+  ungroup() |> 
+  mutate(active_prop = active_time/total) 
+
+active_time_day_id_nested <- active_time_day_id %>% group_by(ID) %>% nest()
+active_time_day_id_nested$sex <- c("m", "m", "m", "f", "f", "f", "f", "m", "m", "f")
+active_time_day_id_nested$age <- c(1, 10, 5, 1, 3, 2, 2, 3, 10, 8)
+active_time_day_id_nested$origin <- c("o", "o", "c", "o", "o", "o", "o", "c", "c","o")
+
+active_time_day_id <- active_time_day_id_nested %>% unnest(data)
+
+```
+
+Plotting active time per day for a single individual
+
+```{r}
+
+active_time_day_id |> filter(ID == "A12") |> ggplot() +
+  geom_hline(yintercept = 480, linetype = "dashed") + 
+  geom_hline(yintercept = 960, linetype = "dashed") +
+  geom_smooth(aes(x = yday, y = inactive_time, colour = ID), fill = "orange", span = 0.5, alpha = 0.15, method = "loess", se = TRUE) +
+  geom_point(aes(x = yday, y = inactive_time, colour = ID), colour = "orange", alpha = 0.85) +
+  geom_smooth(aes(x = yday, y = active_time, colour = ID), fill = "skyblue", span = 0.5, alpha = 0.15, method = "loess", se = TRUE) +
+  geom_point(aes(x = yday, y = active_time, colour = ID), colour = "skyblue", alpha = 0.85) +
+  scale_colour_viridis_d() +
+  scale_x_continuous("Day since start of study", breaks = seq(0,180, 30)) +
+  scale_y_continuous("Number of minutes") +
+  ggtitle("Active time per day") +
+  theme_classic() +
+  theme(legend.position = "none",
+    plot.title = element_text(size = 25),        # Increase plot title size
+    axis.title = element_text(size = 20),        # Increase axis title size
+    axis.text = element_text(size = 16),         # Increase axis text size
+    legend.title = element_text(size = 20),      # Increase legend title size
+    legend.text = element_text(size = 16)        # Increase legend text size
+  )
+
+ggsave(paste0("outputs/plots/active_time_id_12_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300, scale = 1)
+
+```
+
+Plotting active time per day per individual
+
+```{r}
+
+active_time_day_id |> ggplot() +
+  geom_hline(yintercept = 480, linetype = "dashed") + 
+  geom_hline(yintercept = 960, linetype = "dashed") +
+  geom_smooth(aes(x = yday, y = inactive_time, colour = ID), fill = "orange", span = 0.5, alpha = 0.15, method = "loess", se = TRUE) +
+  geom_point(aes(x = yday, y = inactive_time, colour = ID), alpha = 0.25) +
+  geom_smooth(aes(x = yday, y = active_time, colour = ID), fill = "skyblue", span = 0.5, alpha = 0.15, method = "loess", se = TRUE) +
+  geom_point(aes(x = yday, y = active_time, colour = ID), alpha = 0.25) +
+  scale_colour_viridis_d() +
+  scale_x_continuous("Day since start of study", breaks = seq(0,180, 30)) +
+  scale_y_continuous("Number of minutes") +
+  ggtitle("Active time per day per individual") +
+  theme_classic() +
+  theme(legend.position = "none",
+    plot.title = element_text(size = 25),        # Increase plot title size
+    axis.title = element_text(size = 20),        # Increase axis title size
+    axis.text = element_text(size = 16),         # Increase axis text size
+    legend.title = element_text(size = 20),      # Increase legend title size
+    legend.text = element_text(size = 16)        # Increase legend text size
+  )
+
+ggsave(paste0("outputs/plots/active_time_all_ids_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
+
+```
+
+Just males
+
+```{r}
+
+active_time_day_id |> filter(sex == "m") |> ggplot() +
+  geom_hline(yintercept = 480, linetype = "dashed") + 
+  geom_hline(yintercept = 960, linetype = "dashed") +
+  geom_smooth(aes(x = yday, y = inactive_time, colour = ID), fill = "orange", span = 0.5, alpha = 0.15, method = "loess", se = TRUE) +
+  geom_point(aes(x = yday, y = inactive_time, colour = ID), alpha = 0.25) +
+  geom_smooth(aes(x = yday, y = active_time, colour = ID), fill = "skyblue", span = 0.5, alpha = 0.15, method = "loess", se = TRUE) +
+  geom_point(aes(x = yday, y = active_time, colour = ID), alpha = 0.25) +
+  scale_colour_viridis_d() +
+  scale_x_continuous("Day since start of study", breaks = seq(0,180, 30)) +
+  scale_y_continuous("Number of minutes") +
+  ggtitle("Active time per day per individual - males only (n = 5)") +
+  theme_classic() +
+  theme(legend.position = "none",
+    plot.title = element_text(size = 25),        # Increase plot title size
+    axis.title = element_text(size = 20),        # Increase axis title size
+    axis.text = element_text(size = 16),         # Increase axis text size
+    legend.title = element_text(size = 20),      # Increase legend title size
+    legend.text = element_text(size = 16)        # Increase legend text size
+  )
+
+ggsave(paste0("outputs/plots/active_time_males_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
+
+```
+
+Just females
+
+```{r}
+
+active_time_day_id |> filter(sex == "f") |> ggplot() +
+  geom_hline(yintercept = 480, linetype = "dashed") + 
+  geom_hline(yintercept = 960, linetype = "dashed") +
+  geom_smooth(aes(x = yday, y = inactive_time, colour = ID), fill = "orange", span = 0.5, alpha = 0.15, method = "loess", se = TRUE) +
+  geom_point(aes(x = yday, y = inactive_time, colour = ID), alpha = 0.25) +
+  geom_smooth(aes(x = yday, y = active_time, colour = ID), fill = "skyblue", span = 0.5, alpha = 0.15, method = "loess", se = TRUE) +
+  geom_point(aes(x = yday, y = active_time, colour = ID), alpha = 0.25) +
+  scale_colour_viridis_d() +
+  scale_x_continuous("Day since start of study", breaks = seq(0,180, 30)) +
+  scale_y_continuous("Number of minutes") +
+  ggtitle("Active time per day per individual - females only (n = 5)") +
+  theme_classic() +
+  theme(legend.position = "none",
+    plot.title = element_text(size = 25),        # Increase plot title size
+    axis.title = element_text(size = 20),        # Increase axis title size
+    axis.text = element_text(size = 16),         # Increase axis text size
+    legend.title = element_text(size = 20),      # Increase legend title size
+    legend.text = element_text(size = 16)        # Increase legend text size
+  )
+
+ggsave(paste0("outputs/plots/active_time_females_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
+
+```
+
+Plotting average active time per day per individual - by age
+
+```{r}
+
+active_avg_age <- active_time_day_id |> ggplot() +
+  # geom_hline(yintercept = 480, linetype = "dashed") + 
+  geom_hline(yintercept = 960, linetype = "dashed") +
+  geom_boxplot(aes(x = factor(age), y = active_time, group = ID, fill = age), alpha = 0.75) +
+  scale_y_continuous("Number of minutes", limits = c(0,1440)) +
+  scale_x_discrete("Age") +
+  ggtitle("Active time") +
+  scale_fill_viridis_c() +
+  theme_classic() +
+  theme(legend.position = "none",
+    plot.title = element_text(size = 25),        # Increase plot title size
+    axis.title = element_text(size = 20),        # Increase axis title size
+    axis.text = element_text(size = 16),         # Increase axis text size
+    legend.title = element_text(size = 20),      # Increase legend title size
+    legend.text = element_text(size = 16)        # Increase legend text size
+  )
+
+active_avg_age
+
+```
+
+Plotting average active time per day per individual - by sex
+
+```{r}
+
+active_avg_sex <- active_time_day_id |> ggplot() +
+  # geom_hline(yintercept = 480, linetype = "dashed") + 
+  geom_hline(yintercept = 960, linetype = "dashed") +
+  geom_boxplot(aes(x = factor(sex), y = active_time, group = ID, fill = sex), alpha = 0.75) +
+  scale_y_continuous("Number of minutes", limits = c(0,1440)) +
+  scale_x_discrete("Sex") +
+  scale_fill_viridis_d() +
+  theme_classic() +
+  theme(legend.position = "none",
+    plot.title = element_text(size = 25),        # Increase plot title size
+    axis.title = element_text(size = 20),        # Increase axis title size
+    axis.text = element_text(size = 16),         # Increase axis text size
+    legend.title = element_text(size = 20),      # Increase legend title size
+    legend.text = element_text(size = 16)        # Increase legend text size
+  )
+
+active_avg_sex
+
+ggarrange(active_avg_age, active_avg_sex + rremove("ylab"), ncol = 2, nrow = 1, align = "hv")
+
+ggsave(paste0("outputs/plots/active_time_avg_age_sex_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
+
+```
+
+# Assessing spatial activity
+
+
+
+```{r}
+
+
 
 ```
 
