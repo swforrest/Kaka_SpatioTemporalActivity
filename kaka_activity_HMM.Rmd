@@ -17,7 +17,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 library(tidyverse)
 
-packages <- c("ggplot2", "lubridate", "magrittr", "forcats", "actogrammr", "ungeviz", "devtools", "behavr", "ggetho", "damr", "scopr", "sleepr", "zeitgebr", "momentuHMM", "ggpubr", "oce", "tictoc")
+packages <- c("ggplot2", "lubridate", "magrittr", "forcats", "actogrammr", "ungeviz", "devtools", "behavr", "ggetho", "damr", "scopr", "sleepr", "zeitgebr", "momentuHMM", "ggpubr", "oce", "tictoc", "amt", "terra")
 walk(packages, require, character.only = T)
 
 ```
@@ -198,6 +198,7 @@ all_prepped_df <- all_prepped_df_nested |> unnest(cols = c(data)) |> ungroup() |
          day = lubridate::day(DateTimeNZ),
          yday = as.numeric(round(difftime(DateTimeNZ, min(DateTimeNZ), units = "days"))),
          time = hms::as_hms(DateTimeNZ),
+         time_no_dlt_savs = hms::as_hms(DateTimeGMT + 43200), # add on 12 hours in seconds to convert to NZ time without daylight savings
          sun_azimuth = sun_df$azimuth,
          sun_altitude = sun_df$altitude) 
 
@@ -285,7 +286,34 @@ for(i in 1:length(tags)) {
           theme_bw() +
           theme(legend.position = "none"))
   
-  ggsave(paste0("outputs/plots/actogram_logODBA_id_", tags[i], "_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
+  # ggsave(paste0("outputs/plots/actogram_logODBA_id_", tags[i], "_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
+  
+}
+
+```
+
+Showing all days for all individuals
+
+```{r}
+
+for(i in 1:length(tags)) {
+
+  print(all_prepped_df %>% filter(ID == tags[i] & yday < 175) %>% # & month %in% c(9:12, 1:2)
+          ggplot(aes(x = time_no_dlt_savs, y = yday)) +
+          geom_vpline(aes(colour = log(ODBA)), height = 1) +
+          scale_colour_viridis_c() +
+          # scale_colour_gradient(low = "dark blue", high = "white") +
+          geom_point(data = all_prepped_df %>% filter(sun_altitude > -0.065 & sun_altitude < 0.065),
+                     aes(x = time_no_dlt_savs, y = yday), colour = "red", size = 0.15) +
+          geom_point(data = all_prepped_df %>% filter(sun_altitude < -11.925 & sun_altitude > -12.05),
+                     aes(x = time_no_dlt_savs, y = yday), colour = "black", size = 0.15) +
+          scale_y_reverse(limits = c(175, 0)) +
+          # facet_wrap(~ month_year) +
+          ggtitle(paste0("Kākā ID: ", tags[i])) +
+          theme_bw() +
+          theme(legend.position = "none"))
+  
+  # ggsave(paste0("outputs/plots/actogram_logODBA_id_", tags[i], "_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
   
 }
 
@@ -312,6 +340,29 @@ for(i in 1:length(tags)) {
 
 ```
 
+Showing all days for all individuals
+
+```{r}
+
+for(i in 1:length(tags)) {
+
+  print(all_prepped_df %>% filter(ID == tags[i] & yday < 175) %>% # & month %in% c(9:12, 1:2)
+          ggplot(aes(x = time_no_dlt_savs, y = yday)) +
+          geom_vpline(aes(colour = states), height = 1) +
+          # scale_colour_gradient(low = "dark blue", high = "white") +
+          scale_colour_viridis_d() +
+          scale_y_reverse(limits = c(175, 0)) +
+          # facet_wrap(~ month_year) +
+          ggtitle(paste0("Kākā ID: ", tags[i])) +
+          theme_bw() +
+          theme(legend.position = "none"))
+  
+  # ggsave(paste0("outputs/plots/actogram_logODBA_id_", tags[i], "_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
+  
+}
+
+```
+
 ## Single day
 
 ```{r}
@@ -320,7 +371,7 @@ i = 8 # select individual - ID 45512
 
 sept_day_id12 <- all_prepped_df %>% filter(ID == tags[i] & month == 9 & day == 1)
 
-# unique(diff(sign(jan30_id12$sun_altitude))) # this function finds when the sun altitude changes sign (i.e. sunrise and sunset)
+# unique(diff(sign(jan_day_id12$sun_altitude))) # this function finds when the sun altitude changes sign (i.e. sunrise and sunset)
 
 sept_plot <- sept_day_id12 %>%
   
@@ -348,7 +399,7 @@ sept_plot
 
 jan_day_id12 <- all_prepped_df %>% filter(ID == tags[i] & month == 1 & day == 1)
 
-jan_plot <- jan30_id12 %>%
+jan_plot <- jan_day_id12 %>%
   
   ggplot() +
   # adding a rectangle for nautical twilight
@@ -360,9 +411,9 @@ jan_plot <- jan30_id12 %>%
   geom_line(aes(x = DateTimeNZ, y = 3*sun_altitude)) +
   geom_hline(yintercept = 0, linetype = "dashed") + 
   # vertical line at time when sun rises
-  geom_vline(xintercept = jan30_id12$DateTimeNZ[which(diff(sign(jan30_id12$sun_altitude)) > 0)], linetype = "dashed") +
+  geom_vline(xintercept = jan_day_id12$DateTimeNZ[which(diff(sign(jan_day_id12$sun_altitude)) > 0)], linetype = "dashed") +
   # vertical line at time when sun sets
-  geom_vline(xintercept = jan30_id12$DateTimeNZ[which(diff(sign(jan30_id12$sun_altitude)) < 0)], linetype = "dashed") +
+  geom_vline(xintercept = jan_day_id12$DateTimeNZ[which(diff(sign(jan_day_id12$sun_altitude)) < 0)], linetype = "dashed") +
   scale_y_continuous(limits = c(min(3*sept_day_id12$sun_altitude), 750)) +
   # scale_colour_viridis_d() +
   # ggtitle(paste0("Kākā ID: ", tags[i])) +
@@ -564,11 +615,77 @@ ggsave(paste0("outputs/plots/active_time_avg_age_sex_", Sys.Date(), ".png"), wid
 
 # Assessing spatial activity
 
+## Import GPS data
+
+```{r}
+
+gps_files <- paste0("data/", list.files(path = "data", pattern = "speed")) # writes .csv file names to chr vector - 2021 is common across all the datasets of interest
+gps_list <- map(gps_files, read.csv) # reads csv files
+
+names(gps_list) <- as.character(unique(all_prepped_df$ID))
+
+gps_all_df <- bind_rows(gps_list) 
+gps_all_nested <- gps_all_df %>% nest(data = -id)
+gps_all_nested$ID <- as.character(unique(all_prepped_df$ID))
+
+gps_all_df <- gps_all_nested |> unnest(cols = c(data)) |> mutate(X.1 = NULL, # remove a redundant index variable
+                                           DateTimeNZ = with_tz(DateTime, "Pacific/Auckland"),
+                                           DateTimeNZ_R = as.POSIXct(round.POSIXt(DateTimeNZ, units = "mins"))
+                                           )
+
+gps_all_with_states_df <- left_join(gps_all_df, all_prepped_df, by = join_by(DateTimeNZ_R == DateTimeNZ, ID == ID))
+
+```
+
+Nest the data and make tracks
+
+```{r}
+
+gps_all_nested_tracks <- gps_all_with_states_df %>% nest(data = -id) %>% 
+  mutate(trk = map(data, function(d) {
+    make_track(d, lon, lat, DateTimeNZ, crs = 4326, all_cols = TRUE) %>% 
+      transform_coords(2193)
+  }))
+
+# unnest to find the min and max values for the extent of the tracks
+extent <- gps_all_nested_tracks %>% unnest(trk) %>% 
+  summarise(xmin = min(x_), xmax = max(x_), ymin = min(y_), ymax = max(y_))
+
+# create a template raster for the KDEs
+template_raster <- rast(xmin = extent$xmin, xmax = extent$xmax, ymin = extent$ymin, ymax = extent$ymax, res = 50, crs = crs("epsg:2193"))
+
+```
+
 
 
 ```{r}
 
+for(i in 1:length(gps_all_nested_tracks$trk)) {
 
+# kde_full <- hr_kde(gps_all_nested_tracks$trk[[i]], trast = template_raster, levels = c(0.5, 0.75, 0.95))
+# plot(kde_full)
+# kde_full_isopleths <- hr_isopleths(kde_full, levels = c(0.5, 0.75, 0.95))
+# 
+# ggplot() +
+#   geom_sf(data = kde_full_isopleths, fill = "skyblue", alpha = 0.25)
+
+kde_inactive <- hr_kde(gps_all_nested_tracks$trk[[i]] |> filter(states == 1), trast = template_raster, levels = c(0.5, 0.75, 0.95))
+# plot(kde_inactive)
+kde_inactive_isopleths <- hr_isopleths(kde_inactive, levels = c(0.5, 0.75, 0.95))
+
+kde_active <- hr_kde(gps_all_nested_tracks$trk[[i]] |> filter(states == 2), trast = template_raster, levels = c(0.5, 0.75, 0.95))
+# plot(kde_active)
+kde_active_isopleths <- hr_isopleths(kde_active, levels = c(0.5, 0.75, 0.95))
+
+print(ggplot() +
+  geom_sf(data = kde_inactive_isopleths, fill = "skyblue", alpha = 0.25) +
+  geom_sf(data = kde_active_isopleths, fill = "orange", alpha = 0.25) +
+  theme_bw())
+
+print(hr_overlap(kde_inactive, kde_active, type = "ba"))
+
+}
 
 ```
+
 
