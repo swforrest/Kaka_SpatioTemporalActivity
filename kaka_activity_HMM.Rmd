@@ -9,15 +9,20 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+Here we assess the activity of kākā in the Orokonui Ecosanctuary using hidden Markov models (HMMs). We use the `momentuHMM` package to fit the HMMs. For activity we use the overall dynamic body acceleration (ODBA) as a proxy. ODBA is a measure of acceleration that is calculated from the tri-axial accelerometer data. 
+
+The ungeviz package is used to create short vertical line segments to create the actograms using ggplot.
+
 # Setup packages
 
 ```{r packages, message=FALSE, warning=FALSE}
+
 
 # devtools::install_github("wilkelab/ungeviz")
 
 library(tidyverse)
 
-packages <- c("ggplot2", "lubridate", "magrittr", "forcats", "actogrammr", "ungeviz", "devtools", "behavr", "ggetho", "damr", "scopr", "sleepr", "zeitgebr", "momentuHMM", "ggpubr", "oce", "tictoc", "amt", "terra")
+packages <- c("ggplot2", "lubridate", "magrittr", "forcats", "devtools", "momentuHMM", "ungeviz", "ggpubr", "oce", "tictoc", "amt", "terra")
 walk(packages, require, character.only = T)
 
 ```
@@ -27,11 +32,13 @@ walk(packages, require, character.only = T)
 ```{r}
 
 activity_files <- paste0("data/", list.files(path = "data", pattern = "2021")) # writes .csv file names to chr vector - 2021 is common across all the datasets of interest
-all_activity <- map(activity_files, read.csv, skip = 4) # reads csv files
+all_activity <- map(activity_files, read.csv, skip = 4) # reads csv files into list of dataframes
 
 ```
 
 # Clean data
+
+The tags are the identifiers for each GPS device, which we used as the ID. The GMT time is the time the GPS device recorded the data, which we converted to New Zealand time. The temperature column was renamed to be more descriptive, and the original column was removed. We did not use the temperature column for any analyses.
 
 ```{r}
 
@@ -52,7 +59,9 @@ all_activity_df <- bind_rows(all_activity, .id = "ID") # bind all activity data 
 
 # Exploratory data analysis
 
-It appears there are quite clearly two distinct activity states, one with a higher ODBA and one with a lower ODBA. 
+To assess the distributions of the data, we plotted histograms of the ODBA and log(ODBA). Here we are looking at whether the data looks like it separates out into clear states. The log of ODBA helps to assess the states that might be present in the data when there is a large range of values and a right-skewed distribution.
+
+It appears there are quite clearly two distinct activity states, one with a higher ODBA and one with a lower ODBA. There may be a third state, but it is not as clear.
 
 ```{r}
 
@@ -63,13 +72,24 @@ for(i in 1:length(all_activity)) {
       geom_histogram(binwidth = 5, alpha = 1, fill = "orange") +
       ggtitle(paste0("Kākā ID: ", tags[i])) +
       scale_x_continuous("Overall Dynamic Body Acceleration (ODBA)") +
-      theme_bw())
+        scale_y_continuous("Frequency")  +
+    theme_classic() +
+          theme(legend.position = "none",
+    plot.title = element_text(size = 25),        # Increase plot title size
+    axis.title = element_text(size = 20),        # Increase axis title size
+    axis.text = element_text(size = 16),         # Increase axis text size
+    legend.title = element_text(size = 20),      # Increase legend title size
+    legend.text = element_text(size = 16)        # Increase legend text size
+  ))
+  
+  # uncomment to save the plot
+  # ggsave(paste0("outputs/plots/histogram_ODBA_id_", tags[i], "_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
   
 }
 
 ```
 
-The log of ODBA also indicates a possible 3rd state.
+The log of ODBA also indicates a possible 3rd state, which is clearer for some individuals than others.
 
 ```{r}
 
@@ -79,14 +99,27 @@ for(i in 1:length(all_activity)) {
   print(all_activity[[i]] |>  ggplot(aes(log(ODBA))) +
     geom_histogram(binwidth = 0.025, alpha = 1, fill = "orange") +
       ggtitle(paste0("Kākā ID: ", tags[i])) +
-      scale_x_continuous("log of Overall Dynamic Body Acceleration (ODBA)") +
-    theme_bw())
+      scale_x_continuous(expression("log of Overall Dynamic Body Acceleration (ODBA"[log]*")")) +
+        scale_y_continuous("Frequency") +
+    theme_classic() +
+          theme(legend.position = "none",
+    plot.title = element_text(size = 25),        # Increase plot title size
+    axis.title = element_text(size = 20),        # Increase axis title size
+    axis.text = element_text(size = 16),         # Increase axis text size
+    legend.title = element_text(size = 20),      # Increase legend title size
+    legend.text = element_text(size = 16)        # Increase legend text size
+  ))
+  
+  # uncomment to save the plot
+  # ggsave(paste0("outputs/plots/histogram_logODBA_id_", tags[i], "_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
   
 }
 
 ```
 
 # Prepare data for HMM
+
+Here we put the data in an object that can be used in the HMM. We used the `prepData` function from the `momentuHMM` package. The `prepData` function takes a data frame and a vector of column names for the coordinates, although as we don't have coordinates we ignore this argument. We used the `prepData` function to create a list of data frames, one for each individual.
 
 ```{r}
 
@@ -104,6 +137,8 @@ for (i in 1:length(all_activity)) {
 ```
 
 ## Testing distributions to provide intiial parameter estimates in the hidden Markov models
+
+Here we are creating distributions that resemble what we thought the states might look like. We then use these distributions to provide initial parameter estimates for the HMMs. We used the `rweibull` function to create Weibull distributions that were similar to the histograms we created above. We then used the `hist` function to check that the distributions looked similar to the histograms we created above. We then used the parameters from the distributions that looked most similar to the histograms in the HMMs. For other data sources different distributions may be more appropriate.
 
 ```{r}
 
@@ -131,7 +166,9 @@ hist(test, breaks = 100) # looks appropriate for active state - used in model
 
 ```
 
+### Provide parameters to the HMMs 
 
+We used the `fitHMM` function from the `momentuHMM` package. The `fitHMM` function takes a data frame (which we passed as a list to loop over), the number of states, the distributions to use, the initial parameter estimates, and the names of the states. 
 
 ```{r}
 
@@ -146,6 +183,8 @@ Par0 <- list(ODBA = c(1, 2, 8, 250)) # initial parameter estimates
 ```
 
 # Fit HMM to all individuals iteratively
+
+We used the `fitHMM` function to create a list of HMMs, one for each individual as we looped over the data frames. We then used the `plot` function to plot the HMMs. We then used the `viterbi` function to fit the viterbi algorithm to the HMMs, which assigns state labels to each ODBA value. We then used the `table` function to calculate the proportion of time spent in each state. 
 
 ```{r}
 
@@ -172,7 +211,7 @@ for(i in 1:length(all_activity)) {
 
 ```
 
-Organise the results and additional information into a data frame for plotting and further analysis
+### Organise the results and additional information into a data frame for plotting and further analysis
 
 ```{r}
 
@@ -187,8 +226,9 @@ all_prepped_df_nested$origin <- c("o", "o", "c", "o", "o", "o", "o", "c", "c","o
 sun_df <- data.frame(oce::sunAngle(all_prepped_df$DateTimeNZ, latitude = -45.77813, longitude = 170.604312))
 
 all_prepped_df <- all_prepped_df_nested |> unnest(cols = c(data)) |> ungroup() |> 
-  mutate(ID = factor(ID), 
-         states = factor(states), 
+  mutate(ID = factor(ID),
+         id_numeric = as.numeric(ID),
+         states_chr = factor(states, levels = c("1", "2"), labels = c("inactive", "active")),
          sex = factor(sex), 
          origin = factor(origin),
          year = lubridate::year(DateTimeNZ),
@@ -204,11 +244,60 @@ all_prepped_df <- all_prepped_df_nested |> unnest(cols = c(data)) |> ungroup() |
 
 head(all_prepped_df, 10)
 
-write_csv(all_prepped_df, paste0("outputs/data_files/all_prepped_df_", Sys.Date(), ".csv"))
+# uncomment to save the data frame
+# write_csv(all_prepped_df, paste0("outputs/data_files/all_prepped_df_", Sys.Date(), ".csv"))
 
 ```
 
-Estimate the proportion of time spent in each state
+# Plotting ODBA and the state labels
+
+### Scatterplot of ODBA without and with the state labels
+
+```{r}
+
+i = 8
+
+all_prepped_df |> dplyr::filter(ID == tags[i] & month == 9 & day == 1) |>
+  ggplot() +
+  geom_point(aes(x = DateTimeNZ, y = ODBA), size = 0.75, alpha = 0.5) +
+  geom_hline(yintercept = 0, linetype = "dashed") + 
+  scale_y_continuous() +
+  # scale_colour_viridis_d() +
+  ggtitle(paste0("Kākā ID: ", tags[i])) +
+  theme_classic() +
+  theme(legend.position = "none",
+    plot.title = element_text(size = 25),        # Increase plot title size
+    axis.title = element_text(size = 20),        # Increase axis title size
+    axis.text = element_text(size = 16),         # Increase axis text size
+    legend.title = element_text(size = 20),      # Increase legend title size
+    legend.text = element_text(size = 16))        # Increase legend text size
+
+# ggsave(paste0("outputs/plots/scatter_singleday_ODBA_id_12_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
+
+
+all_prepped_df |> dplyr::filter(ID == tags[i] & month == 9 & day == 1) |>
+  ggplot() +
+  geom_point(aes(x = DateTimeNZ, y = ODBA, colour = states), size = 1.5, alpha = 0.75) +
+  geom_hline(yintercept = 0, linetype = "dashed") + 
+  scale_y_continuous() +
+  scale_colour_manual(values = c("orange", "skyblue")) +
+  ggtitle(paste0("Kākā ID: ", tags[i])) +
+  theme_classic() +
+  theme(legend.position = "none",
+    plot.title = element_text(size = 25),        # Increase plot title size
+    axis.title = element_text(size = 20),        # Increase axis title size
+    axis.text = element_text(size = 16),         # Increase axis text size
+    legend.title = element_text(size = 20),      # Increase legend title size
+    legend.text = element_text(size = 16))        # Increase legend text size
+
+# uncomment to save the plot
+# ggsave(paste0("outputs/plots/scatter_singleday_states_ODBA_id_12_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
+
+```
+
+### Estimate the proportion of time spent in each state
+
+Here we estimate the time each individual spent in each state to determine activity budgets. 
 
 ```{r}
 
@@ -225,35 +314,22 @@ prop_df <- data.frame(do.call(rbind, prop)) |> mutate(id = tags)
 colnames(prop_df) <- c("inactive", "active", "id")
 prop_df <- prop_df |> mutate(prop_inactive = inactive/(inactive + active), prop_active = active/(inactive + active))
 
-write_csv(prop_df, paste0("outputs/data_files/minutes_active_inactive_", Sys.Date(), ".csv"))
+# uncomment to save the data frame
+# write_csv(prop_df, paste0("outputs/data_files/minutes_active_inactive_", Sys.Date(), ".csv"))
 
 prop_df_long <- prop_df |> pivot_longer(cols = !"id", values_to = "value")
 
 ```
 
-# Plotting
-
 ## Actograms
 
 ### Colouring by ODBA
 
-Showing a single day
+Showing a single day for one individual, to illustrate the actogram concept. We represent the two dimensions of time (x-axis) and ODBA (y-axis) by plotting the time of day on the x-axis and ODBA as the colour. This allows us to stack days on top of one another and assess behavioural changes over longer time periods.
 
 ```{r}
 
 i = 8
-
-all_prepped_df %>% filter(ID == tags[i] & month == 9 & day == 1) %>% # 
-  ggplot() +
-  geom_point(aes(x = DateTimeNZ, y = ODBA), colour = "black", size = 0.75, alpha = 0.75) +
-  # scale_colour_gradient(low = "dark blue", high = "white") +
-  scale_colour_viridis_c() +
-  scale_x_datetime("Time", date_breaks = "4 hours", date_labels = "%H:%M") +
-  ggtitle(paste0("Kākā ID: ", tags[i])) +
-  theme_classic() +
-  theme(legend.position = "none")
-
-ggsave(paste0("outputs/plots/scatter_singleday_ODBA_id_", tags[i], "_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
 
 all_prepped_df %>% filter(ID == tags[i] & month == 9 & day == 1) %>% # 
   ggplot(aes(x = DateTimeNZ, y = day)) +
@@ -265,34 +341,75 @@ all_prepped_df %>% filter(ID == tags[i] & month == 9 & day == 1) %>% #
   theme_classic() +
   theme(legend.position = "none")
 
-ggsave(paste0("outputs/plots/actogram_singleday_logODBA_id_", tags[i], "_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
+# uncomment to save the plot
+# ggsave(paste0("outputs/plots/actogram_singleday_logODBA_id_", tags[i], "_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
 
 ```
 
-Showing all days for all individuals
+Showing all days for all individuals - month by month. I have commented out this code as the full time period is more informative, but a month by month actogram may also be useful.
+
+```{r}
+
+# for(i in 1:length(tags)) {
+# 
+#   print(all_prepped_df %>% filter(ID == tags[i] & month %in% c(9:12, 1:2)) %>% #
+#           ggplot(aes(x = time, y = day)) +
+#           geom_vpline(aes(colour = log(ODBA)), height = 1) +
+#           # scale_colour_gradient(low = "dark blue", high = "white") +
+#           scale_colour_viridis_c() +
+#           scale_y_reverse() +
+#           facet_wrap(~ month_year) +
+#           ggtitle(paste0("Kākā ID: ", tags[i])) +
+#           theme_bw() +
+#           theme(legend.position = "none"))
+# 
+#   # uncomment to save the plot
+#   # ggsave(paste0("outputs/plots/actogram_logODBA_id_", tags[i], "_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
+# 
+# }
+
+```
+
+### Showing all days for all individuals - all days consecutively
+
+I filtered less than 175 days as I recovered some tags and charged them, and the activity represents the time since the tag was recovered. I also coloured by log(ODBA) due to the right-skew of the data.
 
 ```{r}
 
 for(i in 1:length(tags)) {
 
-  print(all_prepped_df %>% filter(ID == tags[i] & month %in% c(9:12, 1:2)) %>% # 
-          ggplot(aes(x = time, y = day)) +
+  print(all_prepped_df %>% filter(ID == tags[i] & yday < 175) %>% # & month %in% c(9:12, 1:2)
+          ggplot(aes(x = time_no_dlt_savs, y = yday)) +
           geom_vpline(aes(colour = log(ODBA)), height = 1) +
-          # scale_colour_gradient(low = "dark blue", high = "white") +
           scale_colour_viridis_c() +
-          scale_y_reverse() +
-          facet_wrap(~ month_year) +
+          # scale_colour_gradient(low = "dark blue", high = "white") +
+          scale_y_reverse("Day since start of study (27th August 2020)", limits = c(175, 0), breaks = seq(180, 0, -30)) +
+          scale_x_time("Time (without daylight savings)", breaks = seq(0, 86400, 14400)) +
+          # facet_wrap(~ month_year) +
           ggtitle(paste0("Kākā ID: ", tags[i])) +
           theme_bw() +
-          theme(legend.position = "none"))
+          theme(legend.position = "none",
+    plot.title = element_text(size = 25),        # Increase plot title size
+    axis.title = element_text(size = 20),        # Increase axis title size
+    axis.text = element_text(size = 16),         # Increase axis text size
+    legend.title = element_text(size = 20),      # Increase legend title size
+    legend.text = element_text(size = 16)        # Increase legend text size
+  ))
   
-  # ggsave(paste0("outputs/plots/actogram_logODBA_id_", tags[i], "_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
+  # uncomment to save the plot
+  # ggsave(paste0("outputs/plots/actogram_logODBA_full_period_id_", tags[i], "_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
   
 }
 
 ```
 
-Showing all days for all individuals
+### Showing all days for all individuals - all days consecutively with nautical sunrise/set and sunrise/set
+
+It is very clear in the plots above that there are patterns that relate to the time of day, and correspond to changing day lengths. When we plot the time of nautical sunrise (when the angle of the sun is less than -12 degrees below the horizon, relating to the time when the sky is no longer completely dark - i.e. first light) and sunset (when the angle of the sun is 0) we can see that the kākā are mostly active during the day and mostly inactive at night. However, when daylengths are short there is a higher proportion of night time activity, and when day lengths are long there is a higher proportion of day time inactivity. 
+
+These patterns prompted us to assess how long each kākā is active each day despite changing day lengths. 
+
+An interesting pattern is kākā ID 11, which we suspect was nesting. GPS locations also failed much of the time during the mostly inactive period, which is consistent with being in a tree hollow nesting.
 
 ```{r}
 
@@ -304,43 +421,55 @@ for(i in 1:length(tags)) {
           scale_colour_viridis_c() +
           # scale_colour_gradient(low = "dark blue", high = "white") +
           geom_point(data = all_prepped_df %>% filter(sun_altitude > -0.065 & sun_altitude < 0.065),
-                     aes(x = time_no_dlt_savs, y = yday), colour = "red", size = 0.15) +
+                     aes(x = time_no_dlt_savs, y = yday), colour = "red", size = 0.5) +
           geom_point(data = all_prepped_df %>% filter(sun_altitude < -11.925 & sun_altitude > -12.05),
-                     aes(x = time_no_dlt_savs, y = yday), colour = "black", size = 0.15) +
-          scale_y_reverse(limits = c(175, 0)) +
+                     aes(x = time_no_dlt_savs, y = yday), colour = "black", size = 0.5) +
+          scale_y_reverse("Day since start of study (27th August 2020)", limits = c(175, 0), breaks = seq(180, 0, -30)) +
+          scale_x_time("Time (without daylight savings)", breaks = seq(0, 86400, 14400)) +
           # facet_wrap(~ month_year) +
           ggtitle(paste0("Kākā ID: ", tags[i])) +
           theme_bw() +
-          theme(legend.position = "none"))
+          theme(legend.position = "none",
+    plot.title = element_text(size = 25),        # Increase plot title size
+    axis.title = element_text(size = 20),        # Increase axis title size
+    axis.text = element_text(size = 16),         # Increase axis text size
+    legend.title = element_text(size = 20),      # Increase legend title size
+    legend.text = element_text(size = 16)        # Increase legend text size
+  ))
   
-  # ggsave(paste0("outputs/plots/actogram_logODBA_id_", tags[i], "_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
+  # uncomment to save the plot
+  # ggsave(paste0("outputs/plots/actogram_full_period_sun_id_", tags[i], "_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
   
 }
 
 ```
 
-Colouring by state
+### Colouring by state - month by month
+
+This may be informative for other studies, so I have left the commented-out code here.
 
 ```{r}
 
-for(i in 1:length(tags)) {
-
-  print(all_prepped_df %>% filter(ID == tags[i] & month %in% c(9:12, 1:2)) %>% # 
-          ggplot(aes(x = time, y = day)) +
-          geom_vpline(aes(colour = states), height = 1) +
-          # scale_colour_gradient(low = "dark blue", high = "white") +
-          scale_colour_viridis_d() +
-          scale_y_reverse() +
-          facet_wrap(~ month_year) +
-          ggtitle(paste0("Kākā ID: ", tags[i])) +
-          theme_bw() +
-          theme(legend.position = "none"))
-  
-}
+# for(i in 1:length(tags)) {
+# 
+#   print(all_prepped_df %>% filter(ID == tags[i] & month %in% c(9:12, 1:2)) %>% # 
+#           ggplot(aes(x = time, y = day)) +
+#           geom_vpline(aes(colour = states), height = 1) +
+#           # scale_colour_gradient(low = "dark blue", high = "white") +
+#           scale_colour_viridis_d() +
+#           scale_y_reverse() +
+#           facet_wrap(~ month_year) +
+#           ggtitle(paste0("Kākā ID: ", tags[i])) +
+#           theme_bw() +
+#           theme(legend.position = "none"))
+#   
+# }
 
 ```
 
-Showing all days for all individuals
+### Showing all days for all individuals - coloured by state
+
+These plots show the same as the actograms above, although the colouration is by states rather than by the magnitude of ODBA.
 
 ```{r}
 
@@ -350,20 +479,31 @@ for(i in 1:length(tags)) {
           ggplot(aes(x = time_no_dlt_savs, y = yday)) +
           geom_vpline(aes(colour = states), height = 1) +
           # scale_colour_gradient(low = "dark blue", high = "white") +
-          scale_colour_viridis_d() +
+          # scale_colour_viridis_d() +
+          scale_colour_manual(values = c("orange", "skyblue")) +
           scale_y_reverse(limits = c(175, 0)) +
+          scale_x_time("Time (without daylight savings)", breaks = seq(0, 86400, 14400)) +
           # facet_wrap(~ month_year) +
           ggtitle(paste0("Kākā ID: ", tags[i])) +
           theme_bw() +
-          theme(legend.position = "none"))
+          theme(legend.position = "none",
+    plot.title = element_text(size = 25),        # Increase plot title size
+    axis.title = element_text(size = 20),        # Increase axis title size
+    axis.text = element_text(size = 16),         # Increase axis text size
+    legend.title = element_text(size = 20),      # Increase legend title size
+    legend.text = element_text(size = 16)        # Increase legend text size
+  ))
   
-  # ggsave(paste0("outputs/plots/actogram_logODBA_id_", tags[i], "_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
+  # uncomment to save the plot
+  # ggsave(paste0("outputs/plots/actogram_states_full_period_id_", tags[i], "_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
   
 }
 
 ```
 
-## Single day
+## Single days
+
+This plot shows the difference between two days that have a large difference in day length. When the day length is short, this kākā had an active period from roughly 2am - 4am. When the day length is long, this kākā was not active at night, but had an inactive period during the day.
 
 ```{r}
 
@@ -390,9 +530,16 @@ sept_plot <- sept_day_id12 %>%
   geom_vline(xintercept = sept_day_id12$DateTimeNZ[which(diff(sign(sept_day_id12$sun_altitude)) < 0)], linetype = "dashed") +
   scale_y_continuous(limits = c(min(3*sept_day_id12$sun_altitude), 750)) +
   # scale_colour_viridis_d() +
+  scale_colour_manual(values = c("orange", "skyblue")) +
   ggtitle(paste0("Kākā ID: ", tags[i])) +
   theme_classic() +
-  theme(legend.position = "none")
+  theme(legend.position = "none",
+    plot.title = element_text(size = 25),        # Increase plot title size
+    axis.title = element_text(size = 20),        # Increase axis title size
+    axis.text = element_text(size = 16),         # Increase axis text size
+    legend.title = element_text(size = 20),      # Increase legend title size
+    legend.text = element_text(size = 16)        # Increase legend text size
+  )
 
 sept_plot
 
@@ -416,19 +563,29 @@ jan_plot <- jan_day_id12 %>%
   geom_vline(xintercept = jan_day_id12$DateTimeNZ[which(diff(sign(jan_day_id12$sun_altitude)) < 0)], linetype = "dashed") +
   scale_y_continuous(limits = c(min(3*sept_day_id12$sun_altitude), 750)) +
   # scale_colour_viridis_d() +
+  scale_colour_manual(values = c("orange", "skyblue")) +
   # ggtitle(paste0("Kākā ID: ", tags[i])) +
   theme_classic() +
-  theme(legend.position = "none")
+  theme(legend.position = "none",
+    plot.title = element_text(size = 25),        # Increase plot title size
+    axis.title = element_text(size = 20),        # Increase axis title size
+    axis.text = element_text(size = 16),         # Increase axis text size
+    legend.title = element_text(size = 20),      # Increase legend title size
+    legend.text = element_text(size = 16)        # Increase legend text size
+  )
 
 jan_plot
 
 ggarrange(sept_plot + rremove("xlab"), jan_plot, ncol = 1, nrow = 2)
 
-ggsave(paste0("outputs/plots/HMM_45512_Sept_Jan_ggarranged_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
+# uncomment to save the plot
+# ggsave(paste0("outputs/plots/HMM_45512_Sept_Jan_ggarranged_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
 
 ```
 
-Determining the active time per day per individual
+### Determining the active time per day per individual
+
+Here we calculated the active time per day for each individual.
 
 ```{r}
 
@@ -446,9 +603,13 @@ active_time_day_id_nested$origin <- c("o", "o", "c", "o", "o", "o", "o", "c", "c
 
 active_time_day_id <- active_time_day_id_nested %>% unnest(data)
 
+# active_time_day_id |> filter(ID == "A12" & yday == 6) # checking for single id and day
+
 ```
 
-Plotting active time per day for a single individual
+### Plotting active time per day for a single individual
+
+As we were curious about how long each kākā is active for each day, we plotted the active time per day for a single individual across the study period. As you can see, it is remarkably consistent at roughly 8/16 hours inactive/active even as day lengths change significantly. 
 
 ```{r}
 
@@ -472,11 +633,14 @@ active_time_day_id |> filter(ID == "A12") |> ggplot() +
     legend.text = element_text(size = 16)        # Increase legend text size
   )
 
-ggsave(paste0("outputs/plots/active_time_id_12_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300, scale = 1)
+# uncomment to save the plot
+# ggsave(paste0("outputs/plots/active_time_id_12_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300, scale = 1)
 
 ```
 
-Plotting active time per day per individual
+### Plotting active time per day per individual
+
+As we can see, this is also consistent across individuals, although some individuals have quite different patterns.
 
 ```{r}
 
@@ -500,11 +664,14 @@ active_time_day_id |> ggplot() +
     legend.text = element_text(size = 16)        # Increase legend text size
   )
 
-ggsave(paste0("outputs/plots/active_time_all_ids_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
+# uncomment to save the plot
+# ggsave(paste0("outputs/plots/active_time_all_ids_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
 
 ```
 
-Just males
+### Just males
+
+If we look at the plots for males and females separately, we can see that males are much more consistent across the study period. We suspect that this is due to nesting behaviour, as we can confidently say that at least one female - kākā ID 11, who appears green in the female-only plot, was nesting during the study period. This is also evidenced by the actogram above. 
 
 ```{r}
 
@@ -528,11 +695,12 @@ active_time_day_id |> filter(sex == "m") |> ggplot() +
     legend.text = element_text(size = 16)        # Increase legend text size
   )
 
-ggsave(paste0("outputs/plots/active_time_males_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
+# uncomment to save the plot
+# ggsave(paste0("outputs/plots/active_time_males_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
 
 ```
 
-Just females
+### Just females
 
 ```{r}
 
@@ -556,11 +724,14 @@ active_time_day_id |> filter(sex == "f") |> ggplot() +
     legend.text = element_text(size = 16)        # Increase legend text size
   )
 
-ggsave(paste0("outputs/plots/active_time_females_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
+# uncomment to save the plot
+# ggsave(paste0("outputs/plots/active_time_females_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
 
 ```
 
-Plotting average active time per day per individual - by age
+### Plotting average active time per day per individual - by age
+
+When we look at the average active time per day per individual, we can see that it is consistent across ages at roughly 16 hours of active time (960 minutes - dashed line). 
 
 ```{r}
 
@@ -585,7 +756,9 @@ active_avg_age
 
 ```
 
-Plotting average active time per day per individual - by sex
+### Plotting average active time per day per individual - by sex
+
+The average daily active time also doesn't have any correlation to sex (although there's slightly more variance within each females daily active time). This is despite the nesting behaviour observed for females, which is an interesting result - even though there are many days that are below 16 hours for some individuals, it is recovered at other times during the study period and the overall average is still 16 hours.
 
 ```{r}
 
@@ -609,11 +782,14 @@ active_avg_sex
 
 ggarrange(active_avg_age, active_avg_sex + rremove("ylab"), ncol = 2, nrow = 1, align = "hv")
 
-ggsave(paste0("outputs/plots/active_time_avg_age_sex_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
+# uncomment to save the plot
+# ggsave(paste0("outputs/plots/active_time_avg_age_sex_", Sys.Date(), ".png"), width=300, height=170, units="mm", dpi = 300)
 
 ```
 
 # Assessing spatial activity
+
+We can relate activity behaviour to the spatial locations to assess where the behaviours take place. As the GPS devices were set to take locations every 3 hours (or 2 hours for one individual), we can just use the state labels from the ODBA-HMM analysis to match to the time of the GPS locations. Therefore, there's no behavioural state identification of the GPS locations explicitly, but we can infer the behaviour from the ODBA-HMM state labels, which is much higher frequency than the GPS locations.
 
 ## Import GPS data
 
@@ -633,11 +809,19 @@ gps_all_df <- gps_all_nested |> unnest(cols = c(data)) |> mutate(X.1 = NULL, # r
                                            DateTimeNZ_R = as.POSIXct(round.POSIXt(DateTimeNZ, units = "mins"))
                                            )
 
+
+# here we match the rounded times of the GPS locations and the time of the ODBA-HMM state labels
 gps_all_with_states_df <- left_join(gps_all_df, all_prepped_df, by = join_by(DateTimeNZ_R == DateTimeNZ, ID == ID))
 
 ```
 
-Nest the data and make tracks
+### Nest the data and make tracks
+
+The `amt` package has simple functions for Kernel Desnity Estimates (KDEs) from GPS locations, so we convert the GPS data frames to the `amt` track object for each individual. We can then use the `amt` function `kde` to create the KDEs for each individual, which we can delineate by state.
+
+As separating the GPS locations by state removes much of the temporal autocorrelation between locations, we calculate KDEs rather than a method that considers autocorrelation, such as Autocorrelated Kernel Density Estimation (AKDE) (although the `amt` package does have functions for calculating AKDEs).
+
+We also create a template raster with a consistent resolution and extent for the KDEs.
 
 ```{r}
 
@@ -656,33 +840,52 @@ template_raster <- rast(xmin = extent$xmin, xmax = extent$xmax, ymin = extent$ym
 
 ```
 
+### Calculate KDEs for each individual and plot
 
+In this loop we calculate the KDEs for each state for individual, and then plot the KDEs for each state overlaid. We also calculate Bhattacharrya's affinity (BA) for each KDE, which is a measure of the similarity between two distributions. We can use this to assess how similar the KDEs are between states. BA considers the density at each point in the KDE, rather than purely spatial overlap, and is therefore a robust measure of similarity which considers the intensity of space use.
 
 ```{r}
 
+track_sf_points_list <- vector(mode = "list", length = length(gps_all_nested_tracks$trk))
+
 for(i in 1:length(gps_all_nested_tracks$trk)) {
 
-# kde_full <- hr_kde(gps_all_nested_tracks$trk[[i]], trast = template_raster, levels = c(0.5, 0.75, 0.95))
-# plot(kde_full)
-# kde_full_isopleths <- hr_isopleths(kde_full, levels = c(0.5, 0.75, 0.95))
-# 
-# ggplot() +
-#   geom_sf(data = kde_full_isopleths, fill = "skyblue", alpha = 0.25)
-
-kde_inactive <- hr_kde(gps_all_nested_tracks$trk[[i]] |> filter(states == 1), trast = template_raster, levels = c(0.5, 0.75, 0.95))
-# plot(kde_inactive)
-kde_inactive_isopleths <- hr_isopleths(kde_inactive, levels = c(0.5, 0.75, 0.95))
-
-kde_active <- hr_kde(gps_all_nested_tracks$trk[[i]] |> filter(states == 2), trast = template_raster, levels = c(0.5, 0.75, 0.95))
-# plot(kde_active)
-kde_active_isopleths <- hr_isopleths(kde_active, levels = c(0.5, 0.75, 0.95))
-
-print(ggplot() +
-  geom_sf(data = kde_inactive_isopleths, fill = "skyblue", alpha = 0.25) +
-  geom_sf(data = kde_active_isopleths, fill = "orange", alpha = 0.25) +
-  theme_bw())
-
-print(hr_overlap(kde_inactive, kde_active, type = "ba"))
+  # KDE for all the locations at once
+  # kde_full <- hr_kde(gps_all_nested_tracks$trk[[i]], trast = template_raster, levels = c(0.5, 0.75, 0.95))
+  # kde_full_isopleths <- hr_isopleths(kde_full, levels = c(0.5, 0.75, 0.95))
+    
+  # KDE for inactive locations only
+  kde_inactive <- hr_kde(gps_all_nested_tracks$trk[[i]] |> filter(states == 1), trast = template_raster, levels = c(0.5, 0.75, 0.95))
+  kde_inactive_isopleths <- hr_isopleths(kde_inactive, levels = c(0.5, 0.75, 0.95))
+  
+  # KDE for active locations only
+  kde_active <- hr_kde(gps_all_nested_tracks$trk[[i]] |> filter(states == 2), trast = template_raster, levels = c(0.5, 0.75, 0.95))
+  kde_active_isopleths <- hr_isopleths(kde_active, levels = c(0.5, 0.75, 0.95))
+  
+  # calculate the overlap between active and inactive UDs
+  # print(hr_overlap(kde_inactive, kde_active, type = "ba"))
+  
+  # convert the track to an sf object for plotting the points as well
+  track_sf_points_list[[i]] <- as_sf_points(gps_all_nested_tracks$trk[[i]])
+  
+  print(ggplot() +
+          geom_sf(data = kde_active_isopleths, fill = "skyblue", alpha = 0.25) +
+          geom_sf(data = kde_inactive_isopleths, fill = "orange", alpha = 0.25) +
+          geom_sf(data = track_sf_points_list[[i]] |> filter(states == 2), colour = "skyblue", size = 1, alpha = 0.5) + 
+          geom_sf(data = track_sf_points_list[[i]] |> filter(states == 1), colour = "orange", size = 1, alpha = 0.5) + 
+      ggspatial::annotation_scale(location = "bl", width_hint = 0.25, text_col = "black") +
+      ggspatial::annotation_north_arrow(location = "tr") +
+        scale_x_continuous("Easting") +
+        scale_y_continuous("Northing") +
+          ggtitle(paste0("Kākā ID: ", tags[i]),
+                  subtitle = paste0("BA overlap = ", round(hr_overlap(kde_inactive, kde_active, type = "ba")$overlap, digits = 3))) +
+    theme_bw() +
+      theme(plot.title = element_text(size = 25), # Increase plot title size
+            plot.subtitle = element_text(size = 18), # Increase plot subtitle size
+            axis.title = element_text(size = 20)))
+  
+  # uncomment to save the plot
+  # ggsave(paste0("outputs/plots/kde_overlap_id_", tags[i], "_", Sys.Date(), ".png"), width=150, height=170, units="mm", dpi = 300)
 
 }
 
